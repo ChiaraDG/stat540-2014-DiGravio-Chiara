@@ -1,0 +1,46 @@
+Seminar 2: Coin Flip Simulation
+========================================================
+The goal is to simulate a coin flipping. First, we fix the probability of getting head in one toss, and then we look at what will happen if we increase the number of tosses. In particular, we are looking at the proportion of heads.
+ 
+```{r}
+p <- 0.5  # probability of getting head
+prop.head<-c()
+num.head<-c()
+coin.result<-list()
+for (i in 1:450){
+coin.result[[i]]=rbinom(i,size=1,prob=p)
+num.head[i]<-sum(coin.result[[i]])
+prop.head[i]<-num.head[i]/i}
+```
+ 
+Plotting the proportion of heads, we get:
+ 
+```{r fig.width=7, fig.height=6}
+plot(1:450,prop.head, type='l' , xlab='flips' , ylab='proportion Heads' , main="Coin flip simulator")
+abline(a = p, b = 0,col="red")
+```
+ 
+As we expect, the proportion of heads tends to get closer to the real p when the number of tosses increase (in the previous graph, the real p is represented by the red line).
+It is also interesting to see what will happen when we repeat this simulations considering different sample sizes.
+ 
+```{r}
+num.samp <- 200
+samp.size <- 10
+y <- matrix(rbinom(n = num.samp * samp.size, size = 1, p = 0.5), nrow = num.samp, ncol = samp.size)
+y.mean <- apply(y, 1, mean)
+coinFlip <- function(p, num.sample, samp.size) {
+y <- matrix(rbinom(n = num.samp * samp.size, size = 1, p = p), nrow = num.samp, ncol = samp.size)     
+y.mean <- rowMeans(y)     
+return(y.mean)
+}
+samp.sizes <- c(10, 100, 1000, 10000)
+num.samp <- 100
+names(samp.sizes) <- paste("n =", samp.sizes)
+y.mean <- sapply(samp.sizes, coinFlip, num.samp = num.samp, p = 0.5)
+```
+ 
+Here is the boxplot of the results:
+ 
+```{r fig.width=7, fig.height=6}
+boxplot(y.mean, xlab = "Sample size")
+```
