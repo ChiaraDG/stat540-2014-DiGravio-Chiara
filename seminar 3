@@ -1,0 +1,66 @@
+Seminar 3 - Introduction to graphics
+========================================================
+
+Load the required libraries:
+
+```{r}
+library(lattice)
+library(RColorBrewer)
+library(gplots)
+```
+
+and import the data:
+
+```{r}
+design <- read.table("GSE4051_design.tsv", header = T)
+dat <- read.table("GSE4051_data.tsv", header = T)
+str(design)
+```
+Draw 20 probeset at random, reshape and merge the data so we can have a workable dataset:
+
+```{r}
+set.seed(1)
+rp <- sample(1:nrow(dat), size = 20,replace=F)
+newDat <- dat[rp, ]
+# reshape
+newDat20 <- reshape(newDat, varying = list(1:ncol(newDat)), v.names = "geneExp",timevar = "sample_n", 
+                times = names(newDat), idvar = "probset", ids = row.names(newDat), direction = "long")
+newDat20$sample_n <- as.factor(newDat20$sample_n)
+newDat20$probset <- as.factor(newDat20$probset)
+final <- merge(newDat20, design, by.x = "sample_n", by.y = "sidChar")
+```
+
+
+We can consider all the 20 probeset and make a stripplot and a density plot:
+
+```{r fig.width=7, fig.height=6}
+stripplot(geneExp ~ devStage | probset,final,layout = c(5,4),groups = gType, auto.key = TRUE)
+densityplot(~ geneExp | probset, groups=gType,final,grid = TRUE)
+```
+
+From the stripplot it is difficult to draw any conclusion. However, looking at the density plot we can see that for the genes "1431792_a_at" and "1424164_st", there is a difference between the mean of the wild type and the one of the knock out. 
+
+Using the package "gplot" we can also build the heatmap:
+
+```{r}
+# transform dataset in matrix for the heatmap
+mDat <- as.matrix(t(newDat))
+rownames(mDat) <- with(design,paste(devStage, gType, sidChar, sep="_"))
+str(mDat)
+co <- colorRampPalette(brewer.pal(n = 9, "BuPu"))
+```
+
+```{r fig.width=7, fig.height=6}
+heatmap.2(mDat,col = co(256),trace="none")
+
+```
+
+Finally, we can also look at the scatter plot matrix. In this case 4 samples were chosen at random to make the matrix more legible:
+
+```{r}
+s4 <-newDat[,sample(1:ncol(newDat),4)]
+```
+
+```{r fig.width=7, fig.height=6}
+pairs(s4,col="blue")
+```
