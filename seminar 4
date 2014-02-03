@@ -1,0 +1,59 @@
+Seminar 4 - Two group testing
+========================================================
+
+Load the require library and import the data:
+
+```{r}
+library(plyr)
+dat<-read.table("GSE4051_data.tsv",header=T)
+design<-read.table("GSE4051_design.tsv",header=T)
+str(design)
+```
+
+Take 100 genes at random and create a smaller dataset called miniDat:
+
+```{r}
+set.seed(123)
+keepGenes <- sample(1:nrow(dat),size=100)
+miniDat <- dat[keepGenes, ]
+miniDat <- data.frame(gExp = as.vector(t(as.matrix(miniDat))),gene = factor(rep(rownames(miniDat), each = ncol(miniDat)),levels = rownames(miniDat)))
+miniDat <- suppressWarnings(data.frame(design, miniDat))
+str(miniDat)
+```
+
+Create a function that gives as output a dataframe containing the 
+pvalue computed in three different tests (t.test, wilcoxon test and KS test)
+
+
+```{r}
+p.val <- ddply(miniDat, ~ gene, function(z) {
+  t <- t.test(gExp ~ gType, z)
+  wc <- suppressWarnings(wilcox.test(gExp~gType, z))
+  ks <- suppressWarnings(ks.test(z$gExp[z$gType == "NrlKO"], z$gExp[z$gType == "wt"]))
+  c(pvalueT = t$p.value, pvalueW = wc$p.value, pvalueK = ks$p.value)
+})
+head(p.val)
+```
+
+Plot the p-values against each other. In the first plot we simply plot the p-values, while in the second plot we log the axis
+
+```{r fig.width=7, fig.height=6}
+plot(p.val[,2:4],col="purple")
+plot(log(p.val[,2:4]),col="purple")
+```
+
+The p-values are as similar as expected. Most, in fact, of the time we draw the same conclusion from the three test.
+Finally we can check how many genes are hits in each of the three test:
+
+```{r}
+first <- p.val[,-1]
+new <- first<=.05 
+head(new)
+apply(new,2,sum)
+```
+
+and how many genes are "hits" by all the three methods, by two methods, by one and by none: 
+
+```{r}
+count(apply(new,1,sum))
+```
