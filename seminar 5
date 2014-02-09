@@ -1,0 +1,192 @@
+Seminar 5 - Fitting and interpreting linear models (low volume)
+========================================================
+
+Load the required libraries and import the data:
+
+```{r}
+library(lattice)
+library(reshape2)
+library(car)
+prDat <- read.table("GSE4051_data.tsv",header=T)
+str(prDat,max.level=0)
+prDes<-read.table("GSE4051_design.tsv",header=T)
+str(prDes)
+```
+
+The following function, called preparedata, takes as input the probeset IDs and as output it gives a new dataframe. In this case two genes where chosen and a new dataframe, called dat, was created.
+
+```{r}
+luckyGenes <- c("1419655_at","1438815_at")
+preparedata <- function(pID){
+  genexp <- prDat[pID,]
+  Dat <- data.frame(gene = row.names(genexp), genexp)
+  newDat <- melt(Dat, id.vars = "gene")
+  names(newDat) <- c("gene", "sidChar", "gExp")
+  final <- merge(newDat,prDes,by="sidChar")
+  final$sidChar<-as.character(final$sidChar)
+  final$devStage <- factor(final$devStage,c("E16","P2","P6","P10","4_weeks"))
+  final$gType <- factor(final$gType,c("wt","NrlKO"))
+  return(final)}
+dat <- preparedata(luckyGenes)
+```
+
+The next function stripplot a mini dataset. The function was used twice. First, the "dat" dataframe was used as input, then a new mini dataframe was created and used as input.
+
+```{r}
+makeStripplot <- function(x){
+stripplot(gExp ~ devStage | gene, x,group = gType, jitter.data = TRUE,auto.key = TRUE, type = c('p', 'a'), grid = TRUE)}
+```
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(dat)
+makeStripplot(nDat <- preparedata("1456341_a_at"))
+```
+
+Test for a difference in expected gene expression for probeset "1456341_a_at" at developmental stage  P2 versus 4 weeks post-natal.
+
+```{r}
+sub <- subset(nDat,devStage == "P2" | devStage == "4_weeks")
+t.test(sub$gExp ~ sub$devStage,var.equal=T)
+```
+
+Fit a linear model with a categorical covariate:
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(nDat1 <- preparedata("1438786_a_at"))
+```
+
+```{r}
+mod1<-lm(formula = gExp ~ devStage, data = nDat1, subset = gType == "wt")
+summary(mod1)
+```
+
+The intercept is represented by the value of gExp for the developmental stage E16. The result given by fitting a linear model is also confirmed by the blu line in the plot (the one related to the gType "wt"). Also for the devStage effect the result are confirmed by the stripplot. The expression values for devStage P2 and P10 are quite similar.
+
+Perform inference for a contrast:
+
+```{r}
+coef(mod1)
+contMat <- matrix(c(0,1,0,-1,0),nrow=1)
+(obsDiff <- contMat %*% coef(mod1))
+sampMeans <- aggregate(gExp ~ devStage, nDat1, FUN = mean,subset = gType == "wt")
+sampMeans
+with(sampMeans, gExp[devStage == "P2"] - gExp[devStage == "P10"])
+vcov(mod1)
+summary(mod1)$coefficients[ , "Std. Error"]
+sqrt(diag(vcov(mod1)))
+(estSe <- contMat %*% vcov(mod1) %*% t(contMat))
+(testStat <- obsDiff/estSe)
+2 * pt(abs(testStat), df = df.residual(mod1), lower.tail = FALSE)
+```
+
+Fit a linear model with two categorical covariates:
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(oDat <- preparedata("1448690_at"))
+```
+
+```{r}
+oFitBig <- lm(gExp~devStage*gType,data = oDat)
+summary(oFitBig)$coef
+```
+
+Looking at both the stripplot and the results of the linear regression, the intercept value seems plausible. The case for interaction seems very weak. Let's compare this model with a smaller one that does not take into account the interaction.
+
+```{r}
+oFitSmall<- lm(gExp~devStage+gType,data = oDat)
+summary(oFitSmall)$coef
+anova(oFitSmall,oFitBig)
+```
+
+The p-value close to one indicated that there is no evidence for interaction in this case. The following is a gene where interaction is significant:
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(oDat1 <- preparedata("1429225_at"))
+```
+
+```{r}
+str(oDat1)
+oFitBig1 <- lm(gExp~devStage*gType,data = oDat1)
+summary(oFitBig1)$coef
+oFitSmall1<- lm(gExp~devStage+gType,data = oDat1)
+summary(oFitSmall1)$coef
+anova(oFitSmall1,oFitBig1)
+```
+
+Create a function that perform linear regression for a small dataset of genes at the same time.
+
+```{r}
+library(plyr)
+linReg <- ddply(dat, ~ gene, function(z) {
+  estCoefs <- coef(lm(gExp~devStage*gType,data = z))
+  return(estCoefs)
+})
+
+linReg[1,]
+```
+
+To check whether the function works, one of the two luck genes was extracted, then, for this gene I performed linear regression and check whether the results are the same of the ones obtained used the previous function.
+
+```{r}
+# Results from the function
+linReg[1,]
+# Result from simple linear regression
+reg <- preparedata("1419655_at")
+fit <- lm(gExp~devStage*gType,data = reg)
+summary(fit)$coef
+```
+
+As expected the estimates are the same.
+
+Using the variable age instead of devStage. In this case, the gene examinated are the one also presented in class.
+
+```{r}
+prDes$age <-recode(prDes$devStage,"'E16'=-2; 'P2'=2; 'P6'=6; 'P10'=10; '4_weeks'=28",as.factor.result = FALSE)
+datAge <- preparedata(c("1427275_at","1441811_x_at","1456341_a_at"))
+```
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(datAge)
+```
+
+```{r}
+# focus on "1441811_x_at"
+ageNew <- preparedata("1441811_x_at")
+AgeFit <- lm(gExp ~ gType*age, ageNew)
+summary(AgeFit)
+# anova
+anova(lm(gExp ~ age, ageNew), AgeFit)
+# focus on "1427275_at"
+ageNew2 <- preparedata("1427275_at")
+AgeFit2 <- lm(gExp ~ gType*(age+I(age^2)), ageNew2)
+summary(AgeFit2)
+# anova
+anova(lm(gExp ~ age+I(age^2), ageNew2), AgeFit2)
+```
+
+Drop devStage 4 weks and repeat the previous analysis.
+
+```{r}
+no4weeks<-subset(preparedata(c("1427275_at","1441811_x_at")),age==-2 | age == 2 | age == 6 | age == 10)
+str(no4weeks)
+```
+
+```{r fig.width=7, fig.height=6}
+makeStripplot(no4weeks)
+```
+
+```{r}
+# focus on "1441811_x_at"
+new <- subset(no4weeks, subset = gene == "1441811_x_at")
+NewFit <- lm(gExp ~ gType*age, new)
+summary(NewFit)
+# anova
+anova(lm(gExp ~ age, new), NewFit)
+# focus on "1427275_at"
+new2 <- subset(no4weeks, subset = gene == "1427275_at")
+NewFit2 <- lm(gExp ~ gType*(age+I(age^2)), new2)
+summary(NewFit2)
+# anova
+anova(lm(gExp ~ age+I(age^2), new2), NewFit2)
+
+```
