@@ -1,0 +1,169 @@
+Seminar 6 - Fitting and interpreting linear models (high volume)
+========================================================
+
+Load required libraries and import data:
+
+```{r}
+library(limma)
+library(lattice)
+library(reshape2)
+prDes <- read.table("GSE4051_design.tsv",header=T)
+str(prDes)
+prDat <- read.table("GSE4051_data.tsv",header=T)
+str(prDat, max.level=0)
+```
+
+*The difficult in estimating gene-wise data*
+
+```{r}
+# Simulation with only one group
+m <- 1000
+n <- 3
+x <- matrix(rnorm(m * n), nrow = m)
+obsVars <- apply(x, 1, var)
+summary(obsVars)
+mean(obsVars < 1/3)
+```{r fig.width=7, fig.height=6}
+densityplot(~obsVars, n = 200)
+```
+```{r}
+# Simulation with two groups
+# first group
+m1 <- 500
+n1 <- 4
+x1 <- matrix(rnorm(m1 * n1,mean=0,sd=1), nrow = m1)
+# second group
+m2 <- 500
+n2 <- 4
+x2 <- matrix(rnorm(m2 * n2,mean=1,sd=2), nrow = m2)
+# putting them together
+final <- rbind(x1,x2)
+obsVars1 <- apply(final, 1, var)
+summary(obsVars1)
+densityplot(~obsVars1, n = 200)
+
+```
+
+In both cases we get many observed variances really small and others really high, even though the average in around 1 in the simulation with only one group, and it is about 1.5 on average in the secon dimulation setting.
+
+*Fit a linear model: explain gene expression in the wild type mice as a function of developmental stage (one-way ANOVA)*
+
+```{r}
+# Fit a linear model:limma
+wtDes <- subset(prDes, gType == "wt")
+wtDes$devStage <- factor(wtDes$devStage,c("E16","P2","P6","P10","4_weeks"))
+str(wtDes)
+wtDat <- subset(prDat, select = prDes$gType == "wt")
+str(wtDat,max.level=0)
+wtDesMat <- model.matrix(~devStage, wtDes)
+str(wtDesMat)
+wtFit <- lmFit(wtDat, wtDesMat)
+wtEbFit <- eBayes(wtFit)
+topTable(wtEbFit)
+colnames(coef(wtEbFit))  # remind yourself of the coef names
+dsHits <- topTable(wtEbFit, coef = grep("devStage", colnames(coef(wtEbFit))))
+chosenHits<- c(dsHits[3,1],dsHits[6,1],dsHits[9,1])
+preparedata <- function(pID){
+  genexp <- prDat[pID,]
+  Dat <- data.frame(gene = row.names(genexp), genexp)
+  newDat <- melt(Dat, id.vars = "gene")
+  names(newDat) <- c("gene", "sidChar", "gExp")
+  final <- merge(newDat,prDes,by="sidChar")
+  final$sidChar<-as.character(final$sidChar)
+  final$devStage <- factor(final$devStage,c("E16","P2","P6","P10","4_weeks"))
+  return(final)}
+dat <- preparedata(chosenHits)
+makeStripplot <- function(x){
+  stripplot(gExp ~ devStage | gene, x, jitter.data = TRUE,auto.key = TRUE, type = c('p', 'a'), grid = TRUE)}
+makeStripplot(subset(dat, gType == "wt"))
+# Graphs show a high expression change over developmental stage
+```
+
+```{r}
+# Use lm() to check for similar result
+chosenHits[1]
+probe1 <- preparedata(chosenHits[1])
+mod1 <- lm(formula = gExp ~ devStage, data = probe1, subset = gType == "wt")
+summary(mod1)
+chosenHits[2]
+probe2 <- preparedata(chosenHits[2])
+mod2 <- lm(formula = gExp ~ devStage, data = probe2, subset = gType == "wt")
+summary(mod2)
+chosenHits[3]
+probe3 <- preparedata(chosenHits[3])
+mod3 <- lm(formula = gExp ~ devStage, data = probe3, subset = gType == "wt")
+summary(mod3)
+```
+
+*Be the boss of topTable*
+```{r}
+colnames(topTable(wtEbFit))
+# How many probes have Benjamini-Hochberg ("BH") adjusted p-values for the F test conducted above that are less than 1e-05?
+dsHitspval <- topTable(wtEbFit, coef = grep("devStage", colnames(coef(wtEbFit))), n=Inf)$adj.P.Val
+sum(dsHitspval<1e-05)
+dsHits <- topTable(wtEbFit, coef = grep("devStage", colnames(coef(wtEbFit))), n=Inf)
+pr <- dsHits[63,c("F","adj.P.Val","devStageP6")]
+P2tHits <- topTable(wtEbFit, coef = "devStageP2", n = Inf, sort = "none")$t
+P10tHits <- topTable(wtEbFit, coef = "devStageP10", n = Inf, sort = "none")$t
+xyplot(P10tHits ~ P2tHits, aspect =1,xlim = c(-20,16),ylim=c(-20,16),panel=function(...){panel.smoothScatter(...); panel.abline(0,1, col=4)})
+P2apHits <- topTable(wtEbFit, coef = "devStageP2", n = Inf,sort="none")$adj.P.Val
+P10apHits <- topTable(wtEbFit, coef = "devStageP10", n = Inf,sort="none")$adj.P.Val
+densityplot(~ P10apHits + P2apHits, auto.key = TRUE,plot.points = FALSE)
+cutoff <- 1e-03
+foo <- data.frame(P2 = P2apHits < cutoff,P10 = P10apHits < cutoff)
+addmargins(with(foo, table(P2, P10)))
+P2pHits <- topTable(wtEbFit, coef = "devStageP2", n = Inf, sort = "none")$P.Val
+P10pHits <- topTable(wtEbFit, coef = "devStageP10", n = Inf, sort = "none")$P.Val
+P10pVals <- data.frame(raw = P10pHits,BH = P10apHits,BY = p.adjust(P10pHits, method = "BY"))
+splom(P10pVals)
+# contrast
+cont.matrix <- makeContrasts(P10VsP6 = devStageP10 - devStageP6, fourweeksVsP10 = devStage4_weeks - devStageP10, levels = wtDesMat)
+wtFitCont <- contrasts.fit(wtFit, cont.matrix)
+wtEbFitCont <- eBayes(wtFitCont)
+dat<-topTable(wtEbFitCont)
+makeStripplot(preparedata(rownames(dat)[1:4]))
+cutoff <- 1e-04
+wtResCont <- decideTests(wtEbFitCont, p.value = cutoff, method = "global")
+summary(wtResCont)
+(hits1 <- rownames(prDat)[which(wtResCont[, "P10VsP6"] < 0)])
+makeStripplot(preparedata(hits1))
+(hits2 <- rownames(prDat)[which(wtResCont[, "fourweeksVsP10"] < 0)])
+intersect(hits1, hits2)
+makeStripplot(preparedata(hits2))
+(hits3 <- rownames(prDat)[which(wtResCont[, "fourweeksVsP10"] > 0)])
+makeStripplot(preparedata(hits3[1:4]))
+intersect(hits2, hits3)
+intersect(hits1, hits3)
+cutoff <- 0.01
+nHits <- 8
+wtResCont <- decideTests(wtEbFitCont, p.value = cutoff, method = "global")
+summary(wtResCont)
+hits1 <- rownames(prDat)[which(wtResCont[, "P10VsP6"] < 0)]
+makeStripplot(preparedata(hits1[1:nHits]))
+hits2 <- rownames(prDat)[which(wtResCont[, "fourweeksVsP10"] < 0)]
+makeStripplot(preparedata(hits2[1:nHits]))
+hits3 <- rownames(prDat)[which(wtResCont[, "P10VsP6"] > 0)]
+makeStripplot(preparedata(hits3[1:nHits]))
+hits4 <- rownames(prDat)[which(wtResCont[, "fourweeksVsP10"] > 0)]
+makeStripplot(preparedata(hits4[1:nHits]))
+vennDiagram(wtResCont)
+hits5 <- rownames(prDat)[which(wtResCont[, "P10VsP6"] != 0 & wtResCont[, "fourweeksVsP10"] != 0)]
+makeStripplot(preparedata(hits5))
+hits6 <- rownames(prDat)[which(wtResCont[, "P10VsP6"] > 0 & wtResCont[, "fourweeksVsP10"] < 0)]
+makeStripplot(preparedata(hits6))
+```
+
+
+*Take Home Problem*
+
+```{r}
+# Take home
+(cont.matrix <- makeContrasts(P2VsE16 = devStageP2 - Intercept, P6VsP2 = devStageP6 - devStageP2, P10VsP6 = devStageP10 - devStageP6, fourweeksVsP10 = devStage4_weeks - devStageP10, levels = wtDesMat))
+wtFitCont <- contrasts.fit(wtFit, cont.matrix)
+wtEbFitCont <- eBayes(wtFitCont)
+cutoff <- 1e-04
+wtResCont <- decideTests(wtEbFitCont, p.value = cutoff, method = "global")
+summary(wtResCont)
+hitsNew <- rownames(prDat)[which((wtResCont[, "P2VsE16"] != 0 & wtResCont[, "P6VsP2"] != 0) & wtResCont[, "P10VsP6"] == 0 & wtResCont[, "fourweeksVsP10"] == 0)]
+makeStripplot(subset(preparedata(hitsNew[1:6]), gType == "wt"))
+```
