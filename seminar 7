@@ -1,0 +1,157 @@
+Seminar 7:  RNA-seq - Differential Expression Analysis
+========================================================
+
+After loading the required libraries we import the dataset.
+
+```{r, include = FALSE}
+library(edgeR)
+library(DESeq)
+library(limma)
+library(gplots)
+```
+
+```{r}
+# Import data
+dat <- read.table("bottomly_count_table.tsv", header = TRUE, row.names = 1)
+des <- read.table("bottomly_phenodata.tsv", header = TRUE, row.names = 1)
+str(dat)
+str(des)
+```
+
+**GLM edge R**
+
+```{r}
+with(des, table(strain))
+group <- factor(c(rep("1", 10), rep("2", 11)))
+group
+dge.glm <- DGEList(counts = dat, group = group)
+names(dge.glm)
+dge.glm[["samples"]]
+design <- model.matrix(~group)
+design
+dge.glm.com.disp <- estimateGLMCommonDisp(dge.glm, design, verbose = TRUE)
+dge.glm.trend.disp <- estimateGLMTrendedDisp(dge.glm.com.disp)
+dge.glm.tag.disp <- estimateGLMTagwiseDisp(dge.glm.trend.disp, design)
+```
+
+Plot the tagwise dispersion against log2-CPM (counts per million):
+
+```{r fig.width=7, fig.height=6}
+plotBCV(dge.glm.tag.disp)
+```
+
+```{r}
+fit <- glmFit(dge.glm.tag.disp, design)
+colnames(coef(fit))
+lrt <- glmLRT(fit, coef = 2)
+topTags(lrt)
+tt.glm <- topTags(lrt, n = Inf)
+class(tt.glm)
+nrow(tt.glm$table[tt.glm$table$FDR < 0.01, ])
+interestingSamples <- rownames(tt.glm$table[tt.glm$table$FDR < 1e-50, ])
+summary(de.glm <- decideTestsDGE(lrt, p = 0.05, adjust = "BH"))
+```
+
+Plotting the tagwise log fold changes against log-cpm:
+
+```{r fig.width=7, fig.height=6}
+tags.glm <- rownames(dge.glm.tag.disp)[as.logical(de.glm)]
+plotSmear(lrt, de.tags = tags.glm)
+abline(h = c(-2, 2), col = "blue")
+```
+
+_Mini exercise_
+
+First we delete count equal tot 0 across all sample, then we delete count equal to 0 in at least one sample in each genetype group. The resulting dataset is call final:
+
+```{r}
+new1 <- dat[rowSums(dat)>0,]
+group1 <- subset(des, strain == "C57BL/6J")
+group2 <- subset(des, strain == "DBA/2J")
+noZero <- apply(new1, 1, function(row) all(row[1:nrow(group1)]!=0 ) | all(row[nrow(group1)+1:nrow(group2)])!=0)
+final <- new1[noZero,]
+```
+
+Then we repeat the analysis:
+
+```{r}
+dge.glm.new <- DGEList(counts = final, group = group)
+dge.glm.com.disp.new <- estimateGLMCommonDisp(dge.glm.new, design, verbose = TRUE)
+dge.glm.trend.disp.new <- estimateGLMTrendedDisp(dge.glm.com.disp.new)
+dge.glm.tag.disp.new <- estimateGLMTagwiseDisp(dge.glm.trend.disp.new, design)
+# plot the tagwise dispersion against log2-CPM (counts per million)
+plotBCV(dge.glm.tag.disp.new)
+fit.new <- glmFit(dge.glm.tag.disp.new, design)
+lrt.new <- glmLRT(fit.new, coef = 2)
+tt.glm.new <- topTags(lrt.new, n = Inf)
+nrow(tt.glm.new$table[tt.glm.new$table$FDR < 0.01, ])
+```
+
+731 genes have FDR less than 0.01
+
+```{r}
+interestingSamples.new <- rownames(tt.glm.new$table[tt.glm.new$table$FDR < 1e-50, ])
+summary(de.glm.new <- decideTestsDGE(lrt.new, p = 0.05, adjust = "BH"))
+```
+
+588 genes are under-expressed in group 2 (DBA/2J) compared with group 1 (C57BL/6J), 8773 show no differences in expression while 612 genes are over-expressed.
+
+Plotting the tagwise log fold changes against log-cpm:
+
+```{r}
+tags.glm.new <- rownames(dge.glm.tag.disp.new)[as.logical(de.glm.new)]
+plotSmear(lrt.new, de.tags = tags.glm.new)
+abline(h = c(-2, 2), col = "blue")
+```
+
+**DESeq**
+
+```{r}
+deSeqDat <- newCountDataSet(dat, group)
+head(counts(deSeqDat))
+deSeqDat <- estimateSizeFactors(deSeqDat)
+sizeFactors(deSeqDat)
+deSeqDat <- estimateDispersions(deSeqDat)
+```
+
+Plotting the estimated dispersions against the mean normalized counts:
+
+```{r}
+plotDispEsts(deSeqDat)
+results <- nbinomTest(deSeqDat, levels(group)[1], levels(group)[2])
+str(results)
+plotMA(results)
+```
+
+**Voom and limma**
+
+```{r}
+norm.factor <- calcNormFactors(dat)
+dat.voomed <- voom(dat, design, plot = TRUE, lib.size = colSums(dat) * norm.factor)
+fit <- lmFit(dat.voomed, design)
+fit <- eBayes(fit)
+topTable(fit)
+```
+
+
+**Take home exercise**
+
+```{r}
+cutoff <- 1e-4
+# GLM edgeR
+edgeRhits <- tt.glm$table[tt.glm$table$FDR < cutoff, ]
+head(edgeRhits)
+nrow(edgeRhits)
+# DEseq
+DESeqhits <- results[!is.na(results$padj), ]
+DESeqhits <- DESeqhits[DESeqhits$padj < cutoff, ]
+nrow(DESeqhits)
+head(DESeqhits)
+# voom
+hitsVoom <- topTable(fit, p.value = cutoff, coef = "group2",n = Inf)
+nrow(hitsVoom)
+head(hitsVoom)
+# Venn Diagram
+input <- data.frame(edgeR = rownames(dat) %in% rownames(edgeRhits),DESeq = rownames(dat) %in% DESeqhits$id,Voom = rownames(dat) %in% hitsVoom$ID)
+vennDiagram(input)
+```
